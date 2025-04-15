@@ -1,6 +1,9 @@
 import tkinter as tk
 import numpy as np
 from pyproj import Proj, transform
+from image_download import run as download
+import cv2
+from PIL import ImageTk, Image
 
 class Line:
     def __init__(self, map, path = None):
@@ -483,3 +486,37 @@ class Grid:
         self.hide()
         self.grid_ids = []
 
+
+class AerialImage:
+    def __init__(self, parentmap,  north, south, east, west, zoom):
+        self.north = north
+        self.south = south
+        self.east = east
+        self.west = west
+        self.zoom = zoom
+        self.parentmap = parentmap
+        self.image = download(north=north, south=south, east=east, west=west, zoom=zoom)
+
+    def display(self):
+        height, width, channels = self.image.shape
+        print(width, height)
+        width_ratio = (self.parentmap.map_canvas.winfo_width()/width)*(self.east - self.west) / (self.parentmap.easternmost_lon - self.parentmap.westernmost_lon)
+        height_ratio = (self.parentmap.map_canvas.winfo_height()/height)*(self.north - self.south) / (self.parentmap.northernmost_lat - self.parentmap.southernmost_lat)
+        new_width = int(width * width_ratio)
+        new_height = int(height * height_ratio)
+        print(width, height, width_ratio, height_ratio)
+
+        img_rgb = cv2.resize(cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB), (
+            new_width, new_height))
+        self.img_pil = Image.fromarray(img_rgb)
+
+
+        left = new_width * (self.parentmap.westernmost_lon - self.west) / (self.east - self.west)
+        upper = new_height * (self.north - self.parentmap.northernmost_lat) / (self.north - self.south)
+        right = new_width
+        lower = new_height
+        cropped = self.img_pil.crop((left, upper, right, lower))
+        x = 0
+        y = 0
+        self.tk_image = ImageTk.PhotoImage(cropped)
+        self.parentmap.map_canvas.create_image(x, y, anchor=tk.NW, image=self.tk_image)
