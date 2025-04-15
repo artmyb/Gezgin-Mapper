@@ -7,7 +7,7 @@ from PIL import ImageTk, Image
 from functools import partial
 import numpy as np
 from my_gui import LayerContainer
-from graphic_objects import Line, Polygon, Contour, Grid
+from graphic_objects import Line, Polygon, Contour, Grid, AerialImage
 from pyhigh import get_elevation, get_elevation_batch, clear_cache
 from elevation_plot import process_contour, elevation, process_shading
 import threading
@@ -24,39 +24,6 @@ image = download(north = north, south = south, east = east, west = west, zoom = 
 cv2.imwrite("image"+".png",image)
 """
 
-class AerialImage:
-    def __init__(self, parentmap,  north, south, east, west, zoom):
-        self.north = north
-        self.south = south
-        self.east = east
-        self.west = west
-        self.zoom = zoom
-        self.parentmap = parentmap
-        self.image = download(north=north, south=south, east=east, west=west, zoom=zoom)
-
-    def display(self):
-        height, width, channels = self.image.shape
-        print(width, height)
-        width_ratio = (self.parentmap.map_canvas.winfo_width()/width)*(self.east - self.west) / (self.parentmap.easternmost_lon - self.parentmap.westernmost_lon)
-        height_ratio = (self.parentmap.map_canvas.winfo_height()/height)*(self.north - self.south) / (self.parentmap.northernmost_lat - self.parentmap.southernmost_lat)
-        new_width = int(width * width_ratio)
-        new_height = int(height * height_ratio)
-        print(width, height, width_ratio, height_ratio)
-
-        img_rgb = cv2.resize(cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB), (
-            new_width, new_height))
-        self.img_pil = Image.fromarray(img_rgb)
-
-
-        left = new_width * (self.parentmap.westernmost_lon - self.west) / (self.east - self.west)
-        upper = new_height * (self.north - self.parentmap.northernmost_lat) / (self.north - self.south)
-        right = new_width
-        lower = new_height
-        cropped = self.img_pil.crop((left, upper, right, lower))
-        x = 0
-        y = 0
-        self.tk_image = ImageTk.PhotoImage(cropped)
-        self.parentmap.map_canvas.create_image(x, y, anchor=tk.NW, image=self.tk_image)
 
 class Map:
     def __init__(self, root):
@@ -408,26 +375,28 @@ class Map:
             pass
 
     def display_aerial(self, last_call=None, animation=False, afterzoom=False, motion=False):
-        if animation == 1:
+        if animation == 1 and self.aerial_image_on:
             self.current_image.display()
 
-        if animation == -1:
+        if animation == -1 and self.aerial_image_on:
             self.bigger.display()
 
-        if motion == True:
+        if motion == True and self.aerial_image_on:
             self.bigger.display()
 
         if animation == False:
             if motion == True:
                 return
-            self.current_image = AerialImage(self, self.northernmost_lat, self.southernmost_lat, self.easternmost_lon, self.westernmost_lon, zoom = 13 + self.zoom_level)
-            if afterzoom == True:
+            if self.aerial_image_on:
+                self.current_image = AerialImage(self, self.northernmost_lat, self.southernmost_lat, self.easternmost_lon, self.westernmost_lon, zoom = 13 + self.zoom_level)
+            if afterzoom == True and self.aerial_image_on:
                 while self.zoom_in_progress == True:
                     time.sleep(0.1)
             print("aafter")
             if last_call == self.last_call:
                 self.map_canvas.delete("all")
-                self.current_image.display()
+                if self.aerial_image_on:
+                    self.current_image.display()
                 print("current image display")
                 self.visualise_all_polygons()
                 if self.current_polygon:
@@ -451,8 +420,8 @@ class Map:
                                               zoom = 12 + self.zoom_level)
 
                 #self.map_canvas.create_image(0, 0, anchor=tk.NW, image=img_tk)
-
-            threading.Thread(target=bigger_image).start()
+            if self.aerial_image_on:
+                threading.Thread(target=bigger_image).start()
 
 
     def map_settings(self):
@@ -510,31 +479,31 @@ class Map:
     def to_left(self):
         self.center_longitude = self.westernmost_lon
         self.configure_borders()
-        self.display_aerial()
+        self.display_aerial(last_call=self.last_call)
         return
 
     def to_right(self):
         self.center_longitude = self.easternmost_lon
         self.configure_borders()
-        self.display_aerial()
+        self.display_aerial(last_call=self.last_call)
         return
 
     def to_up(self):
         self.center_latitude = self.northernmost_lat
         self.configure_borders()
-        self.display_aerial()
+        self.display_aerial(last_call=self.last_call)
         return
 
     def to_down(self):
         self.center_latitude = self.southernmost_lat
         self.configure_borders()
-        self.display_aerial()
+        self.display_aerial(last_call=self.last_call)
         return
 
     def zoom(self, direction):
         self.zoom_level += direction
         self.configure_borders()
-        self.display_aerial()
+        self.display_aerial(last_call=self.last_call)
         return
 
     def after_motion(self):
@@ -832,19 +801,19 @@ class Map:
                     except Exception as e:
                         print(e)
                         self.polygons[id].outline = ("black",float(outline_width.get()))
-                    self.display_aerial()
+                    self.display_aerial(last_call=self.last_call)
 
                 outline_width.bind("<Return>", outline_width_change)
 
                 def ok():
                     polygon_settings.destroy()
-                    self.display_aerial()
+                    self.display_aerial(last_call=self.last_call)
 
                 def select(event):
                     polygon_style =  polygon_combo.get()
                     self.polygons[id].fill = self.polygon_types[polygon_style][0]
                     self.polygons[id].outline = self.polygon_types[polygon_style][1]
-                    self.display_aerial()
+                    self.display_aerial(last_call=self.last_call)
 
                 polygon_combo.bind("<<ComboboxSelected>>",select)
 
@@ -1130,32 +1099,35 @@ class Map:
 
 
 
+def main():
+    dummy = tk.Tk()
+    dummy.title("OpenTopoMapper (host)")
+    screen_width = dummy.winfo_screenwidth()
+    screen_height = dummy.winfo_screenheight()
 
+    window_width = 0
+    window_height = 0
 
-dummy = tk.Tk()
-dummy.title("OpenTopoMapper (host)")
-screen_width = dummy.winfo_screenwidth()
-screen_height = dummy.winfo_screenheight()
-
-window_width = 0
-window_height = 0
-
-# Calculate position x and y coordinates
-x = (screen_width // 2) - (window_width // 2)
-y = (screen_height // 2) - (window_height // 2)
-dummy.geometry(f'{window_width}x{window_height}+{x}+{y}')
-dummy.overrideredirect(True)
-dummy.resizable(False,False)
-dummy.geometry(f'{window_width}x{window_height}+{99999}+{99999}')
-#root.iconphoto(False,main_icon)
-dummy.deiconify()
-total_instances = 0
-def create_instance():
+    # Calculate position x and y coordinates
+    x = (screen_width // 2) - (window_width // 2)
+    y = (screen_height // 2) - (window_height // 2)
+    dummy.geometry(f'{window_width}x{window_height}+{x}+{y}')
+    dummy.overrideredirect(True)
+    dummy.resizable(False,False)
+    dummy.geometry(f'{window_width}x{window_height}+{99999}+{99999}')
+    #root.iconphoto(False,main_icon)
+    dummy.deiconify()
     global total_instances
-    total_instances += 1
-    map = Map(dummy)
-    map.root.mainloop()
-#tk.Button(text = "Create Instance", command = create_instance).place(x=0,y = 0, anchor = "nw")
+    total_instances = 0
+    def create_instance():
+        global total_instances
+        total_instances += 1
+        map = Map(dummy)
+        map.root.mainloop()
+    #tk.Button(text = "Create Instance", command = create_instance).place(x=0,y = 0, anchor = "nw")
 
-create_instance()
-dummy.mainloop()
+    create_instance()
+    dummy.mainloop()
+
+if __name__ == "__main__":
+    main()
